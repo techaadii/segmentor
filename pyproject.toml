@@ -1,0 +1,39 @@
+[project]
+name = "segmentor"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Sattwik Kumar Sahu", email = "sattwik21@iiserb.ac.in" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.7",
+    "natten==0.21.1+torch290cu130",
+    "numpy>=2.3.3",
+    "pillow>=11.3.0",
+    "rich>=14.2.0",
+    "scikit-image>=0.25.2",
+    "scikit-learn>=1.7.2",
+    "scipy>=1.16.3",
+    "seaborn>=0.13.2",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+    "transformers>=4.57.3",
+    "typer>=0.20.0",
+]
+
+[project.scripts]
+segmentor = "segmentor:main"
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu130"
