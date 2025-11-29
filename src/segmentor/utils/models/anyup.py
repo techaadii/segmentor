@@ -9,12 +9,16 @@ class AnyUp(torch.nn.Module):
 
     GITHUB_REPO = "wimmerth/anyup"
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, use_natten: bool = True, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         # Load the model from GitHub
         self._model: torch.nn.Module = torch.hub.load(
-            AnyUp.GITHUB_REPO, "anyup_multi_backbone", use_natten=True
+            # "wimmerth/anyup",
+            # "anyup",
+            "wimmerth/anyup",
+            "anyup_multi_backbone",
+            use_natten=use_natten,
         )  # type: ignore
 
     @staticmethod
@@ -65,12 +69,20 @@ class AnyUp(torch.nn.Module):
         q_chunk_size: int | None = None,
         n_patches: int | tuple[int, int] | None = None,
     ) -> torch.Tensor:
+        # Image shape should be `(B, 3, H, W)`
+        if image.ndim < 4 and image.shape[0] == 3:
+            image = image.unsqueeze(0)
+
         # Preprocess features
         feature_map = AnyUp.prepare_features(features=features, n_patches=n_patches)
 
+        print(feature_map.shape)
+
         # Output size
         if output_size is None:
-            output_size = image.shape[-2:]  # type: ignore
+            output_size = tuple(image.shape[-2:])  # type: ignore
+
+        print(output_size)
 
         return self._model(
             image, feature_map, output_size=output_size, q_chunk_size=q_chunk_size

@@ -7,7 +7,7 @@ class Encoder[TInput](torch.nn.Module, ABC):
     DIM: int
 
     def __init__(self, *args, **kwargs) -> None:
-        pass
+        super().__init__()
 
     @abstractmethod
     def _embed(self, x: TInput | list[TInput]) -> torch.Tensor:

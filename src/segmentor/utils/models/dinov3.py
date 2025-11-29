@@ -40,4 +40,6 @@ class DINOv3ImageEncoder(ImageEncoder):
         # Perform inference
         outputs = self._model(**inputs)
 
-        return outputs.last_hidden_state
+        return outputs.last_hidden_state[
+            :, 1 + self._model.config.num_register_tokens :, :
+        ]
