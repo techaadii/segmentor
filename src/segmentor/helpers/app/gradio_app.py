@@ -5,7 +5,6 @@ from pathlib import Path
 from PIL import Image as PILImage, ImageDraw
 from torchvision.transforms.v2 import Compose, ToImage, ToDtype
 import matplotlib.pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
 import traceback
 import os
 
@@ -34,7 +33,9 @@ class AppState:
         self.neg_points = []
         self.segmentor = None
         self.current_image = None
+        self.display_image = None  # Image actually shown in UI
         self.mode = "define_exemplars"  # 'define_exemplars' or 'navigate'
+        self.click_mode = "positive"  # 'positive' or 'negative'
         self.segmentation = None
 
 
@@ -98,8 +99,39 @@ def load_images_from_folder(folder_path):
     return image_files
 
 
+def draw_points_on_display_image(image, pos_points, neg_points, scale_x, scale_y):
+    """Draw points on display image with proper scaling"""
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    radius = 8
+
+    # Draw positive points (green) - scale coordinates back to display
+    for orig_x, orig_y in pos_points:
+        x = int(orig_x / scale_x)
+        y = int(orig_y / scale_y)
+        draw.ellipse(
+            [x - radius, y - radius, x + radius, y + radius],
+            fill="green",
+            outline="white",
+            width=2,
+        )
+
+    # Draw negative points (red)
+    for orig_x, orig_y in neg_points:
+        x = int(orig_x / scale_x)
+        y = int(orig_y / scale_y)
+        draw.ellipse(
+            [x - radius, y - radius, x + radius, y + radius],
+            fill="red",
+            outline="white",
+            width=2,
+        )
+
+    return img
+
+
 def draw_points_on_image(image, pos_points, neg_points):
-    """Draw points on image"""
+    """Draw points on image at original coordinates"""
     img = image.copy()
     draw = ImageDraw.Draw(img)
     radius = 8
@@ -155,6 +187,8 @@ def load_folder(folder_path):
                 "❌ No images found in folder",
                 gr.update(visible=False),
                 gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(visible=False),
             )
 
         state.images = image_files
@@ -168,15 +202,28 @@ def load_folder(folder_path):
         # Load first image
         state.current_image = PILImage.open(state.images[0])
 
+        # Create display version (resized to fit height while maintaining aspect ratio)
+        display_height = 600
+        orig_w, orig_h = state.current_image.size
+        aspect_ratio = orig_w / orig_h
+        display_width = int(display_height * aspect_ratio)
+
+        state.display_image = state.current_image.resize(
+            (display_width, display_height), PILImage.Resampling.LANCZOS
+        )
+
         print(f"\n📂 Loaded {len(image_files)} images")
         print(f"📁 First image: {state.images[0].name}")
-        print(f"🖼️  Image size: {state.current_image.size}")
+        print(f"🖼️  Original size: {state.current_image.size}")
+        print(f"🖼️  Display size: {state.display_image.size}")
 
         info = f"✅ Loaded {len(image_files)} images\n📁 Current: {state.images[0].name} (1/{len(state.images)})"
 
         return (
-            state.current_image,
+            state.display_image,
             info,
+            gr.update(visible=True),
+            gr.update(visible=True),
             gr.update(visible=True),
             gr.update(visible=True),
         )
@@ -184,33 +231,59 @@ def load_folder(folder_path):
         error_msg = f"❌ Error: {str(e)}"
         print(error_msg)
         traceback.print_exc()
-        return None, error_msg, gr.update(visible=False), gr.update(visible=False)
+        return (
+            None,
+            error_msg,
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
 
 
 def handle_click(evt: gr.SelectData):
     """Handle click events on the image"""
     if state.mode != "define_exemplars":
-        return state.current_image, get_status_text()
+        return state.display_image, get_status_text()
 
-    # evt.index gives us (x, y) coordinates
-    x, y = int(evt.index[0]), int(evt.index[1])
+    # evt.index gives coordinates on the DISPLAYED image
+    display_x, display_y = evt.index[0], evt.index[1]
 
-    print(f"\n🖱️ Click detected at: ({x}, {y})")
+    # Get original and display dimensions
+    orig_w, orig_h = state.current_image.size
+    disp_w, disp_h = state.display_image.size
 
-    # Check click mode
-    if hasattr(state, "click_mode") and state.click_mode == "negative":
+    # Calculate scaling factors
+    scale_x = orig_w / disp_w
+    scale_y = orig_h / disp_h
+
+    # Map to original image coordinates
+    x = int(display_x * scale_x)
+    y = int(display_y * scale_y)
+
+    # Clamp to image bounds
+    x = max(0, min(x, orig_w - 1))
+    y = max(0, min(y, orig_h - 1))
+
+    print(f"\n🖱️ Click at display: ({display_x}, {display_y})")
+    print(f"   Display size: {disp_w}x{disp_h}")
+    print(f"   Original size: {orig_w}x{orig_h}")
+    print(f"   Scale: ({scale_x:.2f}, {scale_y:.2f})")
+    print(f"   Mapped to: ({x}, {y})")
+
+    # Add point
+    if state.click_mode == "negative":
         state.neg_points.append((x, y))
-        print(f"   ❌ Added NEGATIVE point: ({x}, {y})")
+        print(f"   ❌ Added NEGATIVE point")
     else:
         state.pos_points.append((x, y))
-        print(f"   ✅ Added POSITIVE point: ({x}, {y})")
+        print(f"   ✅ Added POSITIVE point")
 
-    print(f"   Total positive points: {len(state.pos_points)}")
-    print(f"   Total negative points: {len(state.neg_points)}")
+    print(f"   Total: {len(state.pos_points)} pos, {len(state.neg_points)} neg")
 
-    # Draw points on image
-    img_with_points = draw_points_on_image(
-        state.current_image, state.pos_points, state.neg_points
+    # Draw points on DISPLAY image
+    img_with_points = draw_points_on_display_image(
+        state.display_image, state.pos_points, state.neg_points, scale_x, scale_y
     )
 
     return img_with_points, get_status_text()
@@ -230,13 +303,13 @@ def reset_points():
     print(f"   Cleared {len(state.neg_points)} negative points")
     state.pos_points = []
     state.neg_points = []
-    return state.current_image, get_status_text()
+    return state.display_image, get_status_text()
 
 
 def register_exemplars():
     """Register the exemplars and generate segmentation"""
     if not state.pos_points:
-        return state.current_image, "❌ Please add at least one positive point"
+        return state.display_image, "❌ Please add at least one positive point"
 
     try:
         print(f"\nRegistering exemplars...")
@@ -247,28 +320,33 @@ def register_exemplars():
         # Convert image to tensor
         image_tensor = img_to_tensor(state.current_image)
         print(f"Image tensor shape: {image_tensor.shape}")
-        print(f"Image tensor device: {image_tensor.device}")
 
         # Validate coordinates
         h, w = state.current_image.size[1], state.current_image.size[0]
         for x, y in state.pos_points + state.neg_points:
             if x < 0 or x >= w or y < 0 or y >= h:
                 return (
-                    state.current_image,
+                    state.display_image,
                     f"❌ Invalid coordinates: ({x}, {y}) - image size is {w}x{h}",
                 )
 
-        # Register keyframe
+        # Register keyframe with proper coordinate format (y, x) for tensor indexing
         print("Registering keyframe...")
         state.segmentor.register_keyframe(
             image=image_tensor,
-            pos_pixel_coords=state.pos_points,
-            neg_pixel_coords=state.neg_points,
+            pos_pixel_coords=[(y, x) for x, y in state.pos_points],
+            neg_pixel_coords=[(y, x) for x, y in state.neg_points]
+            if state.neg_points
+            else [],
         )
 
         # Generate segmentation
         print("Generating segmentation...")
         output = state.segmentor.step(image=image_tensor, gamma=50)
+
+        if output is None:
+            return state.display_image, "❌ No keyframes registered"
+
         state.segmentation = output.segmentation
 
         print(f"Segmentation shape: {state.segmentation.shape}")
@@ -276,17 +354,29 @@ def register_exemplars():
             f"Segmentation range: [{state.segmentation.min():.3f}, {state.segmentation.max():.3f}]"
         )
 
-        # Overlay segmentation
+        # Overlay segmentation on original image
         img_with_seg = overlay_segmentation(state.current_image, state.segmentation)
+
+        # Create display version
+        display_height = 600
+        orig_w, orig_h = img_with_seg.size
+        aspect_ratio = orig_w / orig_h
+        display_width = int(display_height * aspect_ratio)
+        state.display_image = img_with_seg.resize(
+            (display_width, display_height), PILImage.Resampling.LANCZOS
+        )
 
         # Switch to navigate mode
         state.mode = "navigate"
 
-        return img_with_seg, "✅ Exemplars registered! Use Prev/Next to navigate."
+        return (
+            state.display_image,
+            "✅ Exemplars registered! Use Prev/Next to navigate.",
+        )
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
-        return state.current_image, error_msg
+        return state.display_image, error_msg
 
 
 def navigate_prev():
@@ -298,13 +388,35 @@ def navigate_prev():
         # Generate segmentation
         image_tensor = img_to_tensor(state.current_image)
         output = state.segmentor.step(image=image_tensor, gamma=50)
+
+        if output is None:
+            # Create display image
+            display_height = 600
+            orig_w, orig_h = state.current_image.size
+            aspect_ratio = orig_w / orig_h
+            display_width = int(display_height * aspect_ratio)
+            state.display_image = state.current_image.resize(
+                (display_width, display_height), PILImage.Resampling.LANCZOS
+            )
+            return state.display_image, "❌ No keyframes registered"
+
         state.segmentation = output.segmentation
 
+        # Overlay on original image
         img_with_seg = overlay_segmentation(state.current_image, state.segmentation)
 
-        return img_with_seg, get_status_text()
+        # Create display version
+        display_height = 600
+        orig_w, orig_h = img_with_seg.size
+        aspect_ratio = orig_w / orig_h
+        display_width = int(display_height * aspect_ratio)
+        state.display_image = img_with_seg.resize(
+            (display_width, display_height), PILImage.Resampling.LANCZOS
+        )
 
-    return state.current_image, get_status_text()
+        return state.display_image, get_status_text()
+
+    return state.display_image, get_status_text()
 
 
 def navigate_next():
@@ -316,13 +428,35 @@ def navigate_next():
         # Generate segmentation
         image_tensor = img_to_tensor(state.current_image)
         output = state.segmentor.step(image=image_tensor, gamma=50)
+
+        if output is None:
+            # Create display image
+            display_height = 600
+            orig_w, orig_h = state.current_image.size
+            aspect_ratio = orig_w / orig_h
+            display_width = int(display_height * aspect_ratio)
+            state.display_image = state.current_image.resize(
+                (display_width, display_height), PILImage.Resampling.LANCZOS
+            )
+            return state.display_image, "❌ No keyframes registered"
+
         state.segmentation = output.segmentation
 
+        # Overlay on original image
         img_with_seg = overlay_segmentation(state.current_image, state.segmentation)
 
-        return img_with_seg, get_status_text()
+        # Create display version
+        display_height = 600
+        orig_w, orig_h = img_with_seg.size
+        aspect_ratio = orig_w / orig_h
+        display_width = int(display_height * aspect_ratio)
+        state.display_image = img_with_seg.resize(
+            (display_width, display_height), PILImage.Resampling.LANCZOS
+        )
 
-    return state.current_image, get_status_text()
+        return state.display_image, get_status_text()
+
+    return state.display_image, get_status_text()
 
 
 def start_define_exemplars():
@@ -332,7 +466,16 @@ def start_define_exemplars():
     state.neg_points = []
     state.click_mode = "positive"
 
-    return state.current_image, get_status_text()
+    # Recreate display image
+    display_height = 600
+    orig_w, orig_h = state.current_image.size
+    aspect_ratio = orig_w / orig_h
+    display_width = int(display_height * aspect_ratio)
+    state.display_image = state.current_image.resize(
+        (display_width, display_height), PILImage.Resampling.LANCZOS
+    )
+
+    return state.display_image, get_status_text()
 
 
 def get_status_text():
@@ -344,8 +487,7 @@ def get_status_text():
     status += f"🎯 Mode: {state.mode}\n"
 
     if state.mode == "define_exemplars":
-        click_type = getattr(state, "click_mode", "positive")
-        status += f"🖱️ Click mode: {click_type.upper()}\n"
+        status += f"🖱️ Click mode: {state.click_mode.upper()}\n"
         status += f"✅ Positive points: {len(state.pos_points)}\n"
         status += f"❌ Negative points: {len(state.neg_points)}\n"
         status += "💡 Click on image to add points, then click 'Done' to generate segmentation"
@@ -358,7 +500,7 @@ def get_status_text():
 
 
 # Create Gradio interface
-with gr.Blocks() as demo:
+with gr.Blocks(title="Interactive Segmentor") as demo:
     gr.Markdown("# 🎯 Interactive Image Segmentor")
     gr.Markdown(
         "Load a folder of images and interactively define segmentation exemplars"
@@ -367,19 +509,25 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column(scale=3):
             image_display = gr.Image(
-                label="Image Viewer", type="pil", interactive=False, height=600
+                label="Image Viewer",
+                type="pil",
+                interactive=False,
+                height=600,
+                image_mode="RGB",
+                sources=[],
+                show_label=True,
             )
 
             with gr.Row():
-                with gr.Column(scale=1):
-                    prev_btn = gr.Button("⬅️ Previous", size="lg", visible=False)
-                with gr.Column(scale=1):
-                    next_btn = gr.Button("Next ➡️", size="lg", visible=False)
+                prev_btn = gr.Button("⬅️ Previous", size="lg", visible=False)
+                next_btn = gr.Button("Next ➡️", size="lg", visible=False)
 
         with gr.Column(scale=1):
             gr.Markdown("### 📂 Load Images")
             folder_input = gr.Textbox(
-                label="Folder Path", placeholder="/path/to/image/folder"
+                label="Folder Path",
+                placeholder="/path/to/image/folder",
+                value="/mnt/toshiba_hdd/datasets/test_images",
             )
             load_btn = gr.Button("Load Folder", variant="primary")
 
@@ -400,10 +548,11 @@ with gr.Blocks() as demo:
                     reset_btn = gr.Button("🔄 Reset Points")
                     done_btn = gr.Button("✅ Done", variant="primary")
 
-                gr.Markdown("---")
-                gr.Markdown("### 🧭 Navigation")
+            gr.Markdown("---")
 
-                define_exemplars_btn = gr.Button("🎯 Define Exemplars", size="lg")
+            with gr.Group(visible=False) as nav_group:
+                gr.Markdown("### 🧭 Navigation")
+                define_exemplars_btn = gr.Button("🎯 Define New Exemplars", size="lg")
 
     # Event handlers
     load_btn.click(
@@ -413,7 +562,9 @@ with gr.Blocks() as demo:
             image_display,
             status_text,
             controls_group,
-            gr.Group([prev_btn, next_btn]),
+            nav_group,
+            prev_btn,
+            next_btn,
         ],
     )
 
@@ -435,10 +586,10 @@ with gr.Blocks() as demo:
         fn=start_define_exemplars, outputs=[image_display, status_text]
     )
 
+
 if __name__ == "__main__":
     demo.launch(
         share=False,
         server_name="0.0.0.0",
         server_port=7860,
-        # title="Interactive Segmentor",
     )
