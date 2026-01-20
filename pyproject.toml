@@ -3,30 +3,17 @@ name = "segmentor"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "Sattwik Kumar Sahu", email = "sattwik21@iiserb.ac.in" }
-]
+authors = [{ name = "Sattwik Kumar Sahu", email = "sattwik21@iiserb.ac.in" }]
 requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.12.0",
-    "gradio>=6.0.1",
-    "matplotlib>=3.10.7",
-    "moviepy>=2.2.1",
     "numpy>=2.3.3",
     "opencv-python>=4.11.0.86",
     "pillow>=11.3.0",
-    "plotly>=6.5.0",
-    "rich>=14.2.0",
-    "scikit-image>=0.25.2",
-    "scikit-learn>=1.7.2",
     "scipy>=1.16.3",
-    "seaborn>=0.13.2",
-    "segment-anything>=1.0",
     "torch>=2.9.1",
     "torchvision>=0.24.1",
     "transformers>=4.57.3",
-    "typer>=0.20.0",
-    "ultralytics>=8.3.234",
 ]
 
 [project.scripts]
@@ -45,12 +32,13 @@ name = "pytorch"
 url = "https://download.pytorch.org/whl/cu130"
 
 [dependency-groups]
-dev = [
-    "jupyter>=1.1.1",
-    "pytest>=9.0.1",
-    "ruff>=0.14.6",
-]
-ui = [
-    "gradio>=6.0.1",
-    "streamlit>=1.51.0",
+dev = ["jupyter>=1.1.1", "pytest>=9.0.1", "ruff>=0.14.6"]
+plot = ["matplotlib>=3.10.7", "plotly>=6.5.0", "seaborn>=0.13.2"]
+ui = ["gradio>=6.0.1", "streamlit>=1.51.0", "rich>=14.2.0", "typer>=0.20.0"]
+research = [
+    "moviepy>=2.2.1",
+    "scikit-image>=0.25.2",
+    "scikit-learn>=1.7.2",
+    "segment-anything>=1.0",
+    "ultralytics>=8.3.234",
 ]
