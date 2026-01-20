@@ -20,5 +20,5 @@ type SimilarityFunc = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
 
 
 AttnImplementation = Literal[
-    "sdpa", "flex_attention", "flash_attention", "flash_attention_2"
+    "sdpa", "flex_attention", "flash_attention", "flash_attention_2", "eager"
 ]

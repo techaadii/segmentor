@@ -50,6 +50,11 @@ def cosine_similarity_map(featmap: torch.Tensor, row: int, col: int):
     return sim.view(H, W)
 
 
+# def knn_segmentation(
+#     featmap: torch.Tensor, pos_feats: torch.Tensor, neg_feats: torch.Tensor
+# ) -> torch.Tensor:
+
+
 def probabilistic_segmentation_with_contrastive_scoring(
     featmap: torch.Tensor,
     pos_feats: torch.Tensor,
@@ -216,6 +221,150 @@ def probabilistic_segmentation_with_contrastive_scoring(
     # ----------------------------------------------------------------------
     # 8. Sigmoid converts logits → probabilities in [0, 1].
     # ----------------------------------------------------------------------
+    prob = torch.sigmoid(logits).reshape(H, W)
+
+    return prob
+
+
+def mahalanobis_segmentation(
+    featmap: torch.Tensor,
+    pos_feats: torch.Tensor,
+    neg_feats: torch.Tensor,
+    reg_lambda: float = 0.01,
+) -> torch.Tensor:
+    """
+    Compute a pixelwise probability map using Mahalanobis distance to
+    positive and negative feature distributions.
+
+    Unlike dot-product (cosine) methods which assume hyperspherical clusters,
+    this function models the provided exemplars as Multivariate Gaussian
+    distributions. This allows the segmentation to adapt to the specific
+    variance and correlation structure of the requested object's features.
+
+    The probability is computed via a generative approach:
+        1. Fit Gaussian (Mean, Covariance) to positive examples.
+        2. Fit Gaussian (Mean, Covariance) to negative examples.
+        3. Compute Mahalanobis distance from every pixel to both distributions.
+        4. Convert distances to logits: Logit = Dist_Neg - Dist_Pos.
+        5. Sigmoid(Logit) -> Probability.
+
+    Args:
+        featmap (torch.Tensor):
+            Dense pixelwise feature map of shape (C, H, W).
+        pos_feats (torch.Tensor):
+            Positive exemplar features of shape (n_pos, C).
+        neg_feats (torch.Tensor):
+            Negative exemplar features of shape (n_neg, C).
+        reg_lambda (float):
+            Regularization term added to the diagonal of the covariance matrix
+            (Sigma + lambda*I). This prevents singular matrices when n_samples
+            is small or features are collinear, ensuring invertibility.
+
+    Returns:
+        torch.Tensor:
+            Probability map of shape (H, W), with values in [0, 1].
+
+    Note:
+        If n_pos < 2 or n_neg < 2, the function falls back to Euclidean
+        distance (equivalent to Identity covariance) for that specific class,
+        as variance cannot be reliably estimated from a single point.
+    """
+    C, H, W = featmap.shape
+    device = featmap.device
+
+    # ----------------------------------------------------------------------
+    # 1. Reshape featmap to (N, C) for distance calculation.
+    #    N = H * W
+    # ----------------------------------------------------------------------
+    # Permute to (H, W, C) then reshape to (N, C)
+    pixels = featmap.permute(1, 2, 0).reshape(-1, C)
+    N = pixels.shape[0]
+
+    def get_mahalanobis_sq_dist(
+        distribution_feats: torch.Tensor, query_feats: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Calculates squared Mahalanobis distance: (x-u)^T Sigma^-1 (x-u)
+        """
+        n_samples, n_dim = distribution_feats.shape
+
+        # Case: No exemplars provided
+        if n_samples == 0:
+            return torch.full((query_feats.shape[0],), float("inf"), device=device)
+
+        # 1. Compute Mean
+        mu = distribution_feats.mean(dim=0, keepdim=True)  # (1, C)
+
+        # 2. Compute Inverse Covariance (Precision Matrix)
+        # If we have too few samples to estimate covariance, use Identity (Euclidean)
+        if n_samples < 2:
+            inv_cov = torch.eye(n_dim, device=device)
+        else:
+            # Center the features
+            centered = distribution_feats - mu
+            # Calculate covariance: (X^T @ X) / (n-1)
+            # Shape: (C, C)
+            cov = (centered.T @ centered) / (n_samples - 1)
+
+            # Regularize to ensure invertibility
+            cov = cov + torch.eye(n_dim, device=device) * reg_lambda
+
+            # Invert
+            try:
+                inv_cov = torch.inverse(cov)
+            except RuntimeError:
+                # Fallback if Cholesky/Inverse still fails despite regularization
+                inv_cov = torch.eye(n_dim, device=device)
+
+        # 3. Compute Distance for all pixels
+        # Delta: (N, C)
+        delta = query_feats - mu
+
+        # Mahalanobis distance formulation: sum((delta @ inv_cov) * delta, dim=1)
+        # Optimized term: (N, C) @ (C, C) -> (N, C)
+        left_term = delta @ inv_cov
+
+        # Element-wise mult followed by sum corresponds to diag(A @ B^T)
+        dists = (left_term * delta).sum(dim=1)  # (N,)
+
+        return dists
+
+    # ----------------------------------------------------------------------
+    # 2. Calculate Distances to Positive and Negative Distributions
+    # ----------------------------------------------------------------------
+    # Distance to Positive Distribution (Lower is better)
+    d2_pos = get_mahalanobis_sq_dist(pos_feats, pixels)
+
+    # Distance to Negative Distribution (Lower is bad for being positive)
+    d2_neg = get_mahalanobis_sq_dist(neg_feats, pixels)
+
+    # ----------------------------------------------------------------------
+    # 3. Convert Distances to Probabilities
+    #
+    # Logic:
+    # If a pixel is closer to Positive than Negative, Logit should be > 0.
+    # Logit = Distance_Negative - Distance_Positive
+    #
+    # Note on Bias:
+    # Mahalanobis distance is effectively a negative log-likelihood (ignoring
+    # constants). The diff of squared distances corresponds to the log-odds ratio
+    # assuming equal priors and equal determinants of covariance.
+    # ----------------------------------------------------------------------
+
+    # Handle cases where one set of clicks is missing
+    if pos_feats.shape[0] == 0 and neg_feats.shape[0] > 0:
+        # Only negatives exist: strongly penalize everything close to neg
+        logits = -d2_neg
+    elif neg_feats.shape[0] == 0 and pos_feats.shape[0] > 0:
+        # Only positives exist: value things close to pos
+        # We invert the distance essentially. We need a threshold.
+        # Simple heuristic: Logits = -d2_pos + Constant (centering handled by sigmoid)
+        logits = -d2_pos + d2_pos.mean()
+    else:
+        # Both exist
+        logits = d2_neg - d2_pos
+
+    # Apply Sigmoid to get [0, 1] probability
     prob = torch.sigmoid(logits).reshape(H, W)
 
     return prob

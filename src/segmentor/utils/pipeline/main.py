@@ -16,6 +16,7 @@ from segmentor.utils.pipeline.dense_features import DenseFeatureEncoder
 from segmentor.utils.pipeline.history import History
 from segmentor.utils.pipeline.segmap import (
     probabilistic_segmentation_with_contrastive_scoring,
+    mahalanobis_segmentation,
 )
 from segmentor.helpers.device import DEVICE
 
@@ -131,14 +132,22 @@ class Segmentor:
 
         # Synthesize probablity map
         print(f"Feature shape: {dense_features.shape}")
-        segmentation_map = probabilistic_segmentation_with_contrastive_scoring(
+        segmentation_map = mahalanobis_segmentation(
             featmap=dense_features,
             pos_feats=best_match_keyframe.pos_features.T,
             neg_feats=best_match_keyframe.neg_features.T,
-            gamma=gamma,
-            eta=eta,
-            alpha=alpha,
+            # gamma=gamma,
+            # eta=eta,
+            # alpha=alpha,
         )
+        # segmentation_map = probabilistic_segmentation_with_contrastive_scoring(
+        #     featmap=dense_features,
+        #     pos_feats=best_match_keyframe.pos_features.T,
+        #     neg_feats=best_match_keyframe.neg_features.T,
+        #     gamma=gamma,
+        #     eta=eta,
+        #     alpha=alpha,
+        # )
 
         return SegmentorOutput(
             segmentation=segmentation_map,

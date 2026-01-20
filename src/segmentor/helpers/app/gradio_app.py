@@ -50,7 +50,7 @@ def load_models():
 
         print("Loading DINOv3...")
         dinov3 = DINOv3ImageEncoder(
-            model_name="facebook/dinov3-vitb16-pretrain-lvd1689m",
+            model_name="facebook/dinov3-vits16-pretrain-lvd1689m",
             cache_dir=HF_CACHE_DIR,
             attn_implementation="sdpa",
         ).to(device=DEVICE)

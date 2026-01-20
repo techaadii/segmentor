@@ -15,8 +15,9 @@ class DINOv3ImageEncoder(ImageEncoder):
     def __init__(
         self,
         model_name: str = "facebook/dinov3-vits16-pretrain-lvd1689m",
-        cache_dir: Path = Path("weights/"),
+        cache_dir: Path | None = None,
         attn_implementation: AttnImplementation = "sdpa",
+        dtype: torch.dtype = torch.float16,
         *args,
         **kwargs,
     ) -> None:
@@ -26,10 +27,10 @@ class DINOv3ImageEncoder(ImageEncoder):
         self._processor = AutoImageProcessor.from_pretrained(model_name)
         self._model = AutoModel.from_pretrained(
             model_name,
-            dtype=torch.float16,
+            dtype=dtype,
             device_map="auto",
             attn_implementation=attn_implementation,
-            cache_dir=cache_dir.as_posix(),
+            cache_dir=cache_dir.as_posix() if cache_dir is not None else None,
         )
 
     def _embed(self, x: Image | list[Image]) -> torch.Tensor:
