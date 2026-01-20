@@ -54,7 +54,7 @@ class Segmentor:
         self._pos_features = torch.empty(0)
         self._neg_features = torch.empty(0)
 
-        self._dense_encoder = DenseFeatureEncoder(dinov3=dinov3, anyup=anyup)
+        self._dense_encoder = DenseFeatureEncoder(image_encoder=dinov3, anyup=anyup)
 
     def register_keyframe(
         self,
