@@ -102,7 +102,7 @@ class Segmentor:
         gamma: float = 30,
         eta: float = 1,
         alpha: float = 1,
-    ) -> SegmentorOutput | None:
+    ) -> SegmentorOutput:
         # Load image onto right device
         image = image.to(device=DEVICE)
 
